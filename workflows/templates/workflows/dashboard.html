@@ -141,10 +141,10 @@
                 {% for tarea in tareas %}
                 <tr>
                     <td>{{ tarea.nombre }}</td>
-                    <td>{{ tarea.instancia }}</td>
+                    <td>{{ tarea.workflow.nombre }}</td>
                     <td>{{ tarea.responsable|default:"Sin responsable" }}</td>
-                    <td><span class="estado">{{ tarea.estado }}</span></td>
-                    <td>{{ tarea.fecha_vencimiento|default:"-" }}</td>
+                    <td><span class="estado">{{ tarea.get_estado_display }}</span></td>
+                    <td>{{ tarea.fecha_limite|default:"-" }}</td>
                 </tr>
                 {% empty %}
                 <tr>

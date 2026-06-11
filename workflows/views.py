@@ -1,27 +1,41 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Q
+from django.db.models import Count, F
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from .forms import WorkflowInstanceForm, TaskCommentForm
-from .models import WorkflowInstance, TaskInstance, TaskComment
+from .forms import WorkflowInstanceForm
+from .models import WorkflowInstance, TaskInstance
 
 
 @login_required
 def dashboard(request):
     hoy = timezone.localdate()
     flujos = WorkflowInstance.objects.prefetch_related('tareas').all()[:20]
-    tareas_usuario = TaskInstance.objects.filter(responsable=request.user).exclude(estado=TaskInstance.Estado.TERMINADA)
+    tareas = TaskInstance.objects.select_related('workflow', 'responsable').all().order_by(
+        F('fecha_limite').asc(nulls_last=True), 'workflow__nombre', 'orden'
+    )[:20]
+    flujos_en_curso = WorkflowInstance.objects.filter(estado=WorkflowInstance.Estado.EN_CURSO).count()
+    tareas_pendientes = TaskInstance.objects.filter(estado=TaskInstance.Estado.PENDIENTE).count()
+    tareas_en_curso = TaskInstance.objects.filter(estado=TaskInstance.Estado.EN_CURSO).count()
+    tareas_completadas = TaskInstance.objects.filter(estado=TaskInstance.Estado.TERMINADA).count()
+    tareas_atrasadas = TaskInstance.objects.exclude(
+        estado=TaskInstance.Estado.TERMINADA
+    ).filter(fecha_limite__lt=hoy).count()
     resumen = {
-        'flujos_en_curso': WorkflowInstance.objects.filter(estado=WorkflowInstance.Estado.EN_CURSO).count(),
-        'tareas_en_curso': TaskInstance.objects.filter(estado=TaskInstance.Estado.EN_CURSO).count(),
-        'tareas_atrasadas': TaskInstance.objects.exclude(estado=TaskInstance.Estado.TERMINADA).filter(fecha_limite__lt=hoy).count(),
-        'tareas_terminadas': TaskInstance.objects.filter(estado=TaskInstance.Estado.TERMINADA).count(),
+        'flujos_en_curso': flujos_en_curso,
+        'tareas_en_curso': tareas_en_curso,
+        'tareas_atrasadas': tareas_atrasadas,
+        'tareas_terminadas': tareas_completadas,
     }
     return render(request, 'workflows/dashboard.html', {
         'flujos': flujos,
-        'tareas_usuario': tareas_usuario,
+        'tareas': tareas,
+        'total_flujos': flujos_en_curso,
+        'tareas_pendientes': tareas_pendientes,
+        'tareas_en_curso': tareas_en_curso,
+        'tareas_completadas': tareas_completadas,
+        'tareas_atrasadas': tareas_atrasadas,
         'resumen': resumen,
     })
 
