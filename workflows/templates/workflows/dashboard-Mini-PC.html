@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard de Flujos</title>
+    <style>
+        :root { --bg:#eef2ff; --ink:#0f172a; --muted:#64748b; --card:#fff; --brand:#4f46e5; --ok:#16a34a; --warn:#f59e0b; --bad:#dc2626; --line:#e2e8f0; }
+        * { box-sizing: border-box; }
+        body { font-family: Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif; background: linear-gradient(135deg,#eef2ff,#f8fafc 45%,#ecfeff); margin: 0; color: var(--ink); }
+        header { background: linear-gradient(120deg,#111827,#312e81); color: white; padding: 22px 34px; box-shadow: 0 10px 30px rgba(15,23,42,.25); }
+        header .top { display:flex; justify-content:space-between; align-items:center; gap: 16px; }
+        header h1 { margin:0 0 6px; font-size: 30px; letter-spacing: -.03em; }
+        header p { margin:0; color:#c7d2fe; }
+        .userbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:7px 10px; border-radius:999px; background:rgba(255,255,255,.12); color:inherit; text-decoration:none; border:0; }
+        .logout-form { display:inline; margin:0; }
+        .logout-form button { cursor:pointer; font:inherit; }
+        main { padding: 28px 34px 40px; }
+        a { color: var(--brand); }
+        .messages { margin:0 0 16px; padding:0; list-style:none; }
+        .messages li { background:#fff7ed; border:1px solid #fed7aa; padding:10px 12px; border-radius:12px; margin-bottom:8px; }
+        .cards { display:grid; grid-template-columns: repeat(5, minmax(140px,1fr)); gap:16px; margin-bottom:20px; }
+        .card, .section { background: rgba(255,255,255,.92); border:1px solid rgba(226,232,240,.9); border-radius:18px; box-shadow: 0 10px 30px rgba(15,23,42,.08); }
+        .card { padding:18px; position:relative; overflow:hidden; }
+        .card:after { content:""; position:absolute; right:-22px; top:-22px; width:75px; height:75px; border-radius:50%; background:rgba(79,70,229,.12); }
+        .card h3 { margin:0; color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.06em; }
+        .card p { margin:8px 0 0; font-size:32px; font-weight:800; }
+        .section { padding:20px; margin-bottom:22px; }
+        .section h2 { margin:0 0 14px; font-size:20px; }
+        .actions-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+        .btn { border:0; border-radius:10px; padding:8px 11px; cursor:pointer; text-decoration:none; background:#e0e7ff; color:#3730a3; font-weight:700; display:inline-block; }
+        .btn.ok { background:#dcfce7; color:#166534; } .btn.warn { background:#fef3c7; color:#92400e; } .btn.bad { background:#fee2e2; color:#991b1b; } .btn.dark { background:#1f2937; color:white; }
+        .filters { display:grid; grid-template-columns: 1.2fr 1fr 1fr 1fr auto auto; gap:10px; align-items:end; }
+        label { display:block; color:var(--muted); font-size:12px; font-weight:700; margin-bottom:4px; }
+        input, select, textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:8px 10px; background:white; font:inherit; }
+        table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; }
+        th, td { text-align:left; padding:12px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+        th { background:#f8fafc; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+        .estado { padding:5px 9px; border-radius:999px; font-size:12px; background:#e2e8f0; display:inline-block; font-weight:700; }
+        .estado.en_curso { background:#dbeafe; color:#1d4ed8; } .estado.terminada { background:#dcfce7; color:#166534; } .estado.rechazada { background:#fee2e2; color:#991b1b; } .estado.pendiente { background:#fef9c3; color:#854d0e; }
+        .task-actions form { display:inline-block; margin:0 4px 5px 0; }
+        .quick-form { margin-top:8px; display:grid; gap:6px; min-width:220px; }
+        .grid-2 { display:grid; grid-template-columns: 1.3fr .7fr; gap:22px; }
+        .kanban { display:grid; grid-template-columns: repeat(5, minmax(150px,1fr)); gap:14px; overflow-x:auto; }
+        .lane { background:#f8fafc; border:1px dashed #cbd5e1; border-radius:14px; padding:12px; min-height:150px; }
+        .lane h3 { margin:0 0 10px; font-size:15px; display:flex; justify-content:space-between; }
+        .mini-task { background:white; border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:10px; box-shadow:0 4px 12px rgba(15,23,42,.06); }
+        .mini-task strong { display:block; } .mini-task small, .muted { color:var(--muted); }
+        .timeline { border-left:3px solid #c7d2fe; margin-left:8px; padding-left:18px; }
+        .event { position:relative; margin-bottom:14px; }
+        .event:before { content:""; position:absolute; left:-27px; top:4px; width:13px; height:13px; border-radius:50%; background:var(--brand); border:3px solid white; box-shadow:0 0 0 1px #c7d2fe; }
+        .recent-list { list-style:none; margin:0; padding:0; }
+        .recent-list li { padding:10px 0; border-bottom:1px solid var(--line); }
+        @media (max-width: 1000px) { .cards,.filters,.grid-2 { grid-template-columns:1fr; } .kanban { grid-template-columns: repeat(2, minmax(220px,1fr)); } }
+    </style>
+</head>
+<body>
+<header>
+    <div class="top">
+        <div>
+            <h1>Dashboard de Flujos de Trabajo</h1>
+            <p>Seguimiento operativo con acciones, comentarios, documentos, Kanban, línea de tiempo y reportes.</p>
+        </div>
+        <div class="userbar">
+            <span class="pill">👤 {{ request.user.get_full_name|default:request.user.username }}</span>
+            <a class="pill" href="/admin/">Administración</a>
+            <a class="pill" href="{% url 'workflow_list' %}">Flujos</a>
+            <a class="pill" href="{% url 'task_report_csv' %}">Exportar Excel/CSV</a>
+            <form class="logout-form" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="pill" type="submit">Cerrar sesión</button></form>
+        </div>
+    </div>
+</header>
+<main>
+    {% if messages %}<ul class="messages">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
+
+    <div class="cards">
+        <div class="card"><h3>Flujos activos</h3><p>{{ total_flujos|default:"0" }}</p></div>
+        <div class="card"><h3>Tareas pendientes</h3><p>{{ tareas_pendientes|default:"0" }}</p></div>
+        <div class="card"><h3>Tareas en curso</h3><p>{{ tareas_en_curso|default:"0" }}</p></div>
+        <div class="card"><h3>Tareas completadas</h3><p>{{ tareas_completadas|default:"0" }}</p></div>
+        <div class="card"><h3>Atrasadas / rechazadas</h3><p>{{ tareas_atrasadas|default:"0" }} / {{ tareas_rechazadas|default:"0" }}</p></div>
+    </div>
+
+    <section class="section">
+        <div class="actions-row">
+            <a class="btn dark" href="/admin/workflows/workflowinstance/add/">Nuevo flujo</a>
+            <a class="btn" href="{% url 'workflow_list' %}">Ver flujos</a>
+            <a class="btn ok" href="{% url 'task_report_csv' %}">Exportar Excel/CSV</a>
+        </div>
+        <form class="filters" method="get">
+            <div><label for="q">Búsqueda</label><input id="q" name="q" value="{{ filtros.q }}" placeholder="Tarea, responsable o proyecto/flujo"></div>
+            <div><label for="responsable">Responsable</label><select id="responsable" name="responsable"><option value="">Todos</option>{% for responsable in responsables %}<option value="{{ responsable.id }}" {% if filtros.responsable == responsable.id|stringformat:"s" %}selected{% endif %}>{{ responsable.get_full_name|default:responsable.username }}</option>{% endfor %}</select></div>
+            <div><label for="proyecto">Proyecto/flujo</label><select id="proyecto" name="proyecto"><option value="">Todos</option>{% for proyecto in proyectos %}<option value="{{ proyecto.id }}" {% if filtros.proyecto == proyecto.id|stringformat:"s" %}selected{% endif %}>{{ proyecto.nombre }}</option>{% endfor %}</select></div>
+            <div><label for="estado">Estado</label><select id="estado" name="estado"><option value="">Todos</option>{% for value,label in estados %}<option value="{{ value }}" {% if filtros.estado == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <button class="btn dark" type="submit">Filtrar</button>
+            <a class="btn" href="{% url 'dashboard' %}">Limpiar</a>
+        </form>
+    </section>
+
+    <section class="section">
+        <h2>Tareas filtradas</h2>
+        <table>
+            <thead><tr><th>Tarea</th><th>Proyecto/flujo</th><th>Responsable</th><th>Estado</th><th>Vencimiento</th><th>Acciones / colaboración</th></tr></thead>
+            <tbody>
+            {% for tarea in tareas %}
+                <tr>
+                    <td><strong>{{ tarea.nombre }}</strong><br><span class="muted">{{ tarea.descripcion|default:"Sin descripción" }}</span></td>
+                    <td>{{ tarea.workflow.nombre }}</td>
+                    <td>{{ tarea.responsable.get_full_name|default:tarea.responsable|default:"Sin responsable" }}</td>
+                    <td><span class="estado {{ tarea.estado }}">{{ tarea.get_estado_display }}</span>{% if tarea.atrasada %}<br><span class="muted">Atrasada</span>{% endif %}</td>
+                    <td>{{ tarea.fecha_limite|default:"-" }}</td>
+                    <td class="task-actions">
+                        {% if tarea.can_manage %}
+                            <form method="post" action="{% url 'task_complete' tarea.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn ok" type="submit">Terminar</button></form>
+                            <form method="post" action="{% url 'task_reject' tarea.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn bad" type="submit">Rechazar</button></form>
+                            <form method="post" action="{% url 'task_reopen' tarea.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn warn" type="submit">Devolver/reactivar</button></form>
+                            <form class="quick-form" method="post" action="{% url 'task_comment' tarea.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><textarea name="comentario" rows="2" placeholder="Comentario para esta tarea"></textarea><button class="btn" type="submit">Comentar</button></form>
+                            <form class="quick-form" method="post" enctype="multipart/form-data" action="{% url 'task_attachment' tarea.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="file" name="archivo" required><button class="btn" type="submit">Adjuntar</button></form>
+                        {% else %}
+                            <span class="muted">Sin permisos para acciones.</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6">No hay tareas que coincidan con los filtros.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="section">
+        <h2>Vista Kanban</h2>
+        <div class="kanban">
+            {% for lane in kanban %}
+                <div class="lane">
+                    <h3>{{ lane.label }} <span class="muted">{{ lane.tareas|length }}</span></h3>
+                    {% for tarea in lane.tareas %}
+                        <div class="mini-task"><strong>{{ tarea.nombre }}</strong><small>{{ tarea.workflow.nombre }} · {{ tarea.responsable|default:"Sin responsable" }}</small><br><span class="estado {{ tarea.estado }}">{{ tarea.get_estado_display }}</span></div>
+                    {% empty %}<p class="muted">Sin tareas</p>{% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="grid-2">
+        <section class="section">
+            <h2>Línea de tiempo</h2>
+            <div class="timeline">
+                {% for item in historial_reciente %}
+                    <div class="event"><strong>{{ item.accion|title }}</strong> · {{ item.tarea.nombre }}<br><span class="muted">{{ item.tarea.workflow.nombre }} · {{ item.creado|date:"d/m/Y H:i" }} · {{ item.usuario|default:"Sistema" }}</span>{% if item.detalle %}<br>{{ item.detalle }}{% endif %}</div>
+                {% empty %}<p class="muted">Aún no hay actividad de tareas.</p>{% endfor %}
+            </div>
+        </section>
+        <section class="section">
+            <h2>Actividad/comentarios recientes</h2>
+            <ul class="recent-list">
+                {% for comentario in comentarios_recientes %}<li><strong>{{ comentario.tarea.nombre }}</strong><br>{{ comentario.comentario }}<br><span class="muted">{{ comentario.usuario|default:"Sin usuario" }} · {{ comentario.creado|date:"d/m/Y H:i" }}</span></li>{% empty %}<li class="muted">No hay comentarios todavía.</li>{% endfor %}
+            </ul>
+            <h2 style="margin-top:18px;">Documentos adjuntos</h2>
+            <ul class="recent-list">
+                {% for adjunto in adjuntos_recientes %}<li><strong>{{ adjunto.tarea.nombre }}</strong><br><a href="{{ adjunto.archivo.url }}">{{ adjunto.filename }}</a><br><span class="muted">{{ adjunto.uploaded_by|default:"Sin usuario" }} · {{ adjunto.creado|date:"d/m/Y H:i" }}</span></li>{% empty %}<li class="muted">No hay documentos adjuntos todavía.</li>{% endfor %}
+            </ul>
+        </section>
+    </div>
+</main>
+</body>
+</html>

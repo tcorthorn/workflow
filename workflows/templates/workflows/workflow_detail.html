@@ -1,0 +1,31 @@
+{% extends 'workflows/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div><h3>{{ flujo.nombre }}</h3><div class="text-muted">{{ flujo.plantilla.nombre }} · {{ flujo.get_estado_display }} · avance {{ flujo.porcentaje_avance }}%</div></div>
+  {% if flujo.estado == 'borrador' %}<a class="btn btn-success" href="{% url 'workflow_start' flujo.pk %}">Iniciar flujo</a>{% endif %}
+</div>
+<div class="card p-3">
+  <table class="table align-middle">
+    <thead><tr><th>Orden</th><th>Tarea</th><th>Responsable</th><th>Estado</th><th>Vence</th><th>Acción</th></tr></thead>
+    <tbody>
+    {% for tarea in tareas %}
+      <tr>
+        <td>{{ tarea.orden }}</td>
+        <td><strong>{{ tarea.nombre }}</strong><br><span class="small text-muted">{{ tarea.descripcion }}</span></td>
+        <td>{{ tarea.responsable|default:'Sin responsable' }}</td>
+        <td>{{ tarea.get_estado_display }}{% if tarea.atrasada %} <span class="badge text-bg-danger">Atrasada</span>{% endif %}</td>
+        <td>{{ tarea.fecha_limite|default:'-' }}</td>
+        <td>
+          {% if tarea.estado == 'en_curso' %}
+          <form method="post" action="{% url 'task_complete' tarea.pk %}">{% csrf_token %}
+            <input type="text" name="comentario" class="form-control form-control-sm mb-1" placeholder="Comentario opcional">
+            <button class="btn btn-sm btn-success">Terminar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -212,6 +212,20 @@ class TaskInstance(TimestampedModel):
         TaskHistory.objects.create(tarea=self, usuario=usuario, accion='terminada', detalle=comentario)
         self.workflow.activar_tareas_disponibles(usuario=usuario)
 
+    def rechazar(self, usuario=None, comentario=''):
+        self.estado = self.Estado.RECHAZADA
+        self.fecha_termino = None
+        self.save(update_fields=['estado', 'fecha_termino', 'actualizado'])
+        TaskHistory.objects.create(tarea=self, usuario=usuario, accion='rechazada', detalle=comentario)
+
+    def reabrir(self, usuario=None, comentario=''):
+        self.estado = self.Estado.EN_CURSO
+        if not self.fecha_inicio:
+            self.fecha_inicio = timezone.now()
+        self.fecha_termino = None
+        self.save(update_fields=['estado', 'fecha_inicio', 'fecha_termino', 'actualizado'])
+        TaskHistory.objects.create(tarea=self, usuario=usuario, accion='reabierta', detalle=comentario)
+
 
 class TaskHistory(TimestampedModel):
     tarea = models.ForeignKey(TaskInstance, on_delete=models.CASCADE, related_name='historial')
