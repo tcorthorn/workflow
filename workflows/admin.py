@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     WorkflowTemplate, TaskTemplate, TaskDependency, WorkflowInstance,
-    TaskInstance, TaskHistory, TaskComment
+    TaskInstance, TaskHistory, TaskComment, TaskAttachment
 )
 
 
@@ -77,3 +77,10 @@ class TaskHistoryAdmin(admin.ModelAdmin):
 class TaskCommentAdmin(admin.ModelAdmin):
     list_display = ('tarea', 'usuario', 'creado')
     search_fields = ('comentario', 'tarea__nombre')
+
+
+@admin.register(TaskAttachment)
+class TaskAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('tarea', 'archivo', 'uploaded_by', 'creado')
+    search_fields = ('archivo', 'tarea__nombre')
+    list_filter = ('uploaded_by',)

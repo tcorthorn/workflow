@@ -1,5 +1,5 @@
 from django import forms
-from .models import WorkflowInstance, TaskInstance, TaskComment
+from .models import WorkflowInstance, TaskInstance, TaskComment, TaskAttachment
 
 
 class WorkflowInstanceForm(forms.ModelForm):
@@ -23,3 +23,12 @@ class TaskCommentForm(forms.ModelForm):
     class Meta:
         model = TaskComment
         fields = ['comentario']
+        widgets = {
+            'comentario': forms.Textarea(attrs={'rows': 2, 'placeholder': 'Agregar comentario...'})
+        }
+
+
+class TaskAttachmentForm(forms.ModelForm):
+    class Meta:
+        model = TaskAttachment
+        fields = ['archivo']

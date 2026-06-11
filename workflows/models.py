@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -210,6 +212,20 @@ class TaskInstance(TimestampedModel):
         TaskHistory.objects.create(tarea=self, usuario=usuario, accion='terminada', detalle=comentario)
         self.workflow.activar_tareas_disponibles(usuario=usuario)
 
+    def rechazar(self, usuario=None, comentario=''):
+        self.estado = self.Estado.RECHAZADA
+        self.fecha_termino = None
+        self.save(update_fields=['estado', 'fecha_termino', 'actualizado'])
+        TaskHistory.objects.create(tarea=self, usuario=usuario, accion='rechazada', detalle=comentario)
+
+    def reabrir(self, usuario=None, comentario=''):
+        self.estado = self.Estado.EN_CURSO
+        if not self.fecha_inicio:
+            self.fecha_inicio = timezone.now()
+        self.fecha_termino = None
+        self.save(update_fields=['estado', 'fecha_inicio', 'fecha_termino', 'actualizado'])
+        TaskHistory.objects.create(tarea=self, usuario=usuario, accion='reabierta', detalle=comentario)
+
 
 class TaskHistory(TimestampedModel):
     tarea = models.ForeignKey(TaskInstance, on_delete=models.CASCADE, related_name='historial')
@@ -235,3 +251,24 @@ class TaskComment(TimestampedModel):
         ordering = ['-creado']
         verbose_name = 'Comentario'
         verbose_name_plural = 'Comentarios'
+
+    def __str__(self):
+        return f'{self.tarea} - {self.usuario or "Sin usuario"}'
+
+
+class TaskAttachment(TimestampedModel):
+    tarea = models.ForeignKey(TaskInstance, on_delete=models.CASCADE, related_name='adjuntos')
+    archivo = models.FileField(upload_to='task_attachments/%Y/%m/')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-creado']
+        verbose_name = 'Documento adjunto'
+        verbose_name_plural = 'Documentos adjuntos'
+
+    def __str__(self):
+        return f'{self.tarea} - {self.archivo.name}'
+
+    @property
+    def filename(self):
+        return Path(str(self.archivo.name)).name
