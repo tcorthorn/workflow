@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     WorkflowTemplate, TaskTemplate, TaskDependency, WorkflowInstance,
-    TaskInstance, TaskHistory, TaskComment, TaskAttachment
+    TaskInstance, WorkflowAlert, TaskHistory, TaskComment, TaskAttachment
 )
 
 
@@ -64,6 +64,14 @@ class TaskInstanceAdmin(admin.ModelAdmin):
     def terminar_tareas(self, request, queryset):
         for tarea in queryset:
             tarea.terminar(usuario=request.user, comentario='Terminada desde administración.')
+
+
+@admin.register(WorkflowAlert)
+class WorkflowAlertAdmin(admin.ModelAdmin):
+    list_display = ('tipo', 'estado', 'canal', 'tarea', 'destinatario', 'fecha_objetivo', 'enviar_despues_de', 'intentos', 'ultimo_intento_en', 'enviada_en')
+    list_filter = ('estado', 'tipo', 'canal', 'destinatario')
+    search_fields = ('asunto', 'mensaje', 'tarea__nombre', 'tarea__workflow__nombre', 'dedupe_key')
+    readonly_fields = ('creado', 'actualizado', 'enviada_en', 'ultimo_intento_en', 'dedupe_key')
 
 
 @admin.register(TaskHistory)

@@ -235,6 +235,56 @@ class TaskInstance(TimestampedModel):
         TaskHistory.objects.create(tarea=self, usuario=usuario, accion='reabierta', detalle=comentario)
 
 
+class WorkflowAlert(TimestampedModel):
+    class Tipo(models.TextChoices):
+        TAREA_ATRASADA = 'tarea_atrasada', 'Tarea atrasada'
+        VENCE_HOY = 'vence_hoy', 'Vence hoy'
+        VENCE_MANANA = 'vence_manana', 'Vence mañana'
+        SIN_RESPONSABLE = 'sin_responsable', 'Sin responsable'
+        TAREA_RECHAZADA = 'tarea_rechazada', 'Tarea rechazada'
+
+    class Estado(models.TextChoices):
+        PENDIENTE = 'pendiente', 'Pendiente'
+        EN_ENVIO = 'en_envio', 'En envío'
+        ENVIADA = 'enviada', 'Enviada'
+        FALLIDA = 'fallida', 'Fallida'
+        CANCELADA = 'cancelada', 'Cancelada'
+
+    tarea = models.ForeignKey(TaskInstance, on_delete=models.CASCADE, related_name='alertas')
+    destinatario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='workflow_alertas',
+    )
+    tipo = models.CharField(max_length=40, choices=Tipo.choices)
+    canal = models.CharField(max_length=20, default='telegram')
+    estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
+    dedupe_key = models.CharField(max_length=255, unique=True)
+    asunto = models.CharField(max_length=255)
+    mensaje = models.TextField()
+    fecha_objetivo = models.DateField(null=True, blank=True)
+    enviar_despues_de = models.DateTimeField(null=True, blank=True)
+    enviada_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    ultimo_intento_en = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['estado', 'enviar_despues_de', 'creado']
+        indexes = [
+            models.Index(fields=['estado', 'canal']),
+            models.Index(fields=['tipo', 'fecha_objetivo']),
+            models.Index(fields=['tarea', 'tipo']),
+        ]
+        verbose_name = 'Alerta de workflow'
+        verbose_name_plural = 'Alertas de workflow'
+
+    def __str__(self):
+        return f'{self.get_tipo_display()} para {self.tarea} ({self.estado})'
+
+
 class TaskHistory(TimestampedModel):
     tarea = models.ForeignKey(TaskInstance, on_delete=models.CASCADE, related_name='historial')
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
