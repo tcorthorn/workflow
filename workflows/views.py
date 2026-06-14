@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -11,6 +12,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from .forms import TaskAttachmentForm, TaskCommentForm, WorkflowInstanceForm
 from .models import TaskAttachment, TaskComment, TaskHistory, TaskInstance, WorkflowInstance
@@ -262,32 +266,85 @@ def task_attachment(request, pk):
     return redirect(_next_url(request, tarea))
 
 
-@login_required
-def task_report_csv(request):
-    response = HttpResponse('\ufeff', content_type='text/csv; charset=utf-8-sig')
-    response['Content-Disposition'] = 'attachment; filename="tareas_workflow.csv"'
-    writer = csv.writer(response)
-    writer.writerow([
+def _task_report_headers():
+    return [
         'ID', 'Tarea', 'Proyecto/flujo', 'Responsable', 'Estado', 'Fecha inicio',
         'Fecha límite', 'Fecha término', 'Atrasada', 'Comentarios', 'Adjuntos'
-    ])
+    ]
+
+
+def _safe_excel_text(value):
+    if isinstance(value, str) and value.startswith(('=', '+', '-', '@', '\t', '\r', '\n')):
+        return f"'{value}"
+    return value
+
+
+def _task_report_rows(sanitize_excel=False):
     tareas = TaskInstance.objects.select_related('workflow', 'responsable').annotate(
         total_comentarios=Count('comentarios', distinct=True),
         total_adjuntos=Count('adjuntos', distinct=True),
     ).order_by('workflow__nombre', 'orden')
     for tarea in tareas:
         responsable = tarea.responsable.get_full_name() or tarea.responsable.username if tarea.responsable else 'Sin responsable'
-        writer.writerow([
+        row = [
             tarea.pk,
             tarea.nombre,
             tarea.workflow.nombre,
             responsable,
             tarea.get_estado_display(),
-            tarea.fecha_inicio.date().isoformat() if tarea.fecha_inicio else '',
-            tarea.fecha_limite.isoformat() if tarea.fecha_limite else '',
-            tarea.fecha_termino.date().isoformat() if tarea.fecha_termino else '',
+            tarea.fecha_inicio.date() if tarea.fecha_inicio else None,
+            tarea.fecha_limite if tarea.fecha_limite else None,
+            tarea.fecha_termino.date() if tarea.fecha_termino else None,
             'Sí' if tarea.atrasada else 'No',
             tarea.total_comentarios,
             tarea.total_adjuntos,
-        ])
+        ]
+        if sanitize_excel:
+            row = [_safe_excel_text(value) for value in row]
+        yield row
+
+
+@login_required
+def task_report_excel(request):
+    headers = _task_report_headers()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Tareas'
+
+    ws.append(headers)
+
+    header_fill = PatternFill('solid', fgColor='1F4E78')
+    header_font = Font(color='FFFFFF', bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    for row in _task_report_rows(sanitize_excel=True):
+        ws.append(row)
+
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = ws.dimensions
+    for column_cells in ws.columns:
+        max_length = max(len(str(cell.value or '')) for cell in column_cells)
+        ws.column_dimensions[get_column_letter(column_cells[0].column)].width = min(max_length + 2, 35)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    response = HttpResponse(
+        output.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="tareas_workflow.xlsx"'
+    return response
+
+
+@login_required
+def task_report_csv(request):
+    response = HttpResponse('\ufeff', content_type='text/csv; charset=utf-8-sig')
+    response['Content-Disposition'] = 'attachment; filename="tareas_workflow.csv"'
+    writer = csv.writer(response)
+    writer.writerow(_task_report_headers())
+    writer.writerows(_task_report_rows(sanitize_excel=False))
     return response

@@ -1,5 +1,5 @@
 import csv
-from io import StringIO
+from io import BytesIO, StringIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -7,6 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from .models import (
     TaskAttachment,
@@ -180,13 +181,47 @@ class DashboardViewTests(TestCase):
         self.assertRedirects(response, reverse("dashboard"))
         self.assertTrue(TaskAttachment.objects.filter(tarea=self.task, archivo__contains="documento").exists())
 
-    def test_export_csv_compatible_with_excel(self):
+    def test_export_excel_workbook(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("task_report_excel"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn('filename="tareas_workflow.xlsx"', response["Content-Disposition"])
+
+        wb = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
+        ws = wb["Tareas"]
+        headers = [cell.value for cell in ws[1]]
+        first_data_row = [cell.value for cell in ws[2]]
+
+        self.assertIn("Proyecto/flujo", headers)
+        self.assertEqual(first_data_row[1], "Revisar promesa")
+        self.assertEqual(first_data_row[2], "Operación Las Condes")
+
+    def test_export_excel_escapes_formula_like_text(self):
+        self.client.force_login(self.user)
+        self.task.nombre = '=HYPERLINK("https://example.com","x")'
+        self.task.save(update_fields=["nombre"])
+
+        response = self.client.get(reverse("task_report_excel"))
+
+        wb = load_workbook(BytesIO(response.content), read_only=True, data_only=False)
+        ws = wb["Tareas"]
+        self.assertEqual(ws[2][1].value, "'=HYPERLINK(\"https://example.com\",\"x\")")
+        self.assertEqual(ws[2][1].data_type, "s")
+
+    def test_legacy_csv_url_keeps_csv_download(self):
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("task_report_csv"))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8-sig")
+        self.assertIn('filename="tareas_workflow.csv"', response["Content-Disposition"])
         content = response.content.decode("utf-8-sig")
         rows = list(csv.DictReader(StringIO(content)))
         self.assertEqual(rows[0]["Tarea"], "Revisar promesa")

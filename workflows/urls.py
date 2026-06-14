@@ -12,6 +12,7 @@ urlpatterns = [
     path('tareas/<int:pk>/reactivar/', views.task_reopen, name='task_reopen'),
     path('tareas/<int:pk>/comentarios/', views.task_comment, name='task_comment'),
     path('tareas/<int:pk>/adjuntos/', views.task_attachment, name='task_attachment'),
+    path('reportes/tareas.xlsx', views.task_report_excel, name='task_report_excel'),
     path('reportes/tareas.csv', views.task_report_csv, name='task_report_csv'),
     path('api/dashboard/', views.dashboard_data, name='dashboard_data'),
 ]

@@ -65,7 +65,7 @@
             <span class="pill">👤 {{ request.user.get_full_name|default:request.user.username }}</span>
             <a class="pill" href="/admin/">Administración</a>
             <a class="pill" href="{% url 'workflow_list' %}">Flujos</a>
-            <a class="pill" href="{% url 'task_report_csv' %}">Exportar Excel/CSV</a>
+            <a class="pill" href="{% url 'task_report_excel' %}">Exportar Excel</a>
             <form class="logout-form" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="pill" type="submit">Cerrar sesión</button></form>
         </div>
     </div>
@@ -85,7 +85,7 @@
         <div class="actions-row">
             <a class="btn dark" href="/admin/workflows/workflowinstance/add/">Nuevo flujo</a>
             <a class="btn" href="{% url 'workflow_list' %}">Ver flujos</a>
-            <a class="btn ok" href="{% url 'task_report_csv' %}">Exportar Excel/CSV</a>
+            <a class="btn ok" href="{% url 'task_report_excel' %}">Exportar Excel</a>
         </div>
         <form class="filters" method="get">
             <div><label for="q">Búsqueda</label><input id="q" name="q" value="{{ filtros.q }}" placeholder="Tarea, responsable o proyecto/flujo"></div>
