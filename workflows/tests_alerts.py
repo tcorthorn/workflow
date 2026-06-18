@@ -7,7 +7,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from .models import TaskInstance, TaskTemplate, WorkflowAlert, WorkflowInstance, WorkflowTemplate
+from .models import TaskInstance, TaskTemplate, WorkflowAlert, WorkflowAlertConfig, WorkflowInstance, WorkflowTemplate
 
 
 @override_settings(WORKFLOW_ALERTS_DEFAULT_CHANNELS=["telegram", "email"])
@@ -50,6 +50,179 @@ class WorkflowAlertsCommandTests(TestCase):
         out = StringIO()
         call_command("workflow_alerts", *args, stdout=out)
         return out.getvalue()
+
+    def test_generate_uses_admin_alert_config_channels_and_days_before(self):
+        WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            canal_preferido=WorkflowAlertConfig.Canal.AMBOS,
+            dias_antes_vencimiento=3,
+            avisar_vencen_hoy=False,
+            avisar_atrasadas=False,
+            avisar_sin_responsable=False,
+            avisar_rechazadas=False,
+        )
+        task = self.make_task(
+            "Vence en tres días",
+            fecha_limite=timezone.localdate() + timezone.timedelta(days=3),
+            responsable=self.responsible,
+        )
+
+        self.run_command("--generate")
+
+        alerts = WorkflowAlert.objects.filter(tarea=task).order_by("canal")
+        self.assertEqual(alerts.count(), 2)
+        self.assertEqual(set(alerts.values_list("canal", flat=True)), {"telegram", "email"})
+        self.assertEqual(set(alerts.values_list("tipo", flat=True)), {WorkflowAlert.Tipo.VENCE_PROXIMAMENTE})
+
+    def test_generate_skips_workflow_when_admin_alert_config_is_inactive(self):
+        WorkflowAlertConfig.objects.create(workflow=self.workflow, activa=False)
+        self.make_task("Atrasada", fecha_limite=timezone.localdate() - timezone.timedelta(days=1), responsable=self.responsible)
+
+        self.run_command("--generate")
+
+        self.assertEqual(WorkflowAlert.objects.count(), 0)
+
+    def test_generate_repeats_overdue_daily_when_enabled(self):
+        WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            repetir_atrasadas_diario=True,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+        )
+        task = self.make_task("Atrasada", fecha_limite=timezone.localdate() - timezone.timedelta(days=2), responsable=self.responsible)
+
+        self.run_command("--generate")
+
+        alert = WorkflowAlert.objects.get(tarea=task, tipo=WorkflowAlert.Tipo.TAREA_ATRASADA)
+        self.assertEqual(alert.fecha_objetivo, timezone.localdate())
+        self.assertIn(str(task.fecha_limite), alert.mensaje)
+
+    def test_generate_can_notify_owner_and_responsible(self):
+        WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            avisar_propietario=True,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+        )
+        task = self.make_task("Vence hoy", fecha_limite=timezone.localdate(), responsable=self.responsible)
+
+        self.run_command("--generate")
+
+        self.assertEqual(
+            set(WorkflowAlert.objects.filter(tarea=task).values_list("destinatario", flat=True)),
+            {self.owner.id, self.responsible.id},
+        )
+
+    def test_pending_keeps_owner_alert_when_config_notifies_owner(self):
+        WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            avisar_propietario=True,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+        )
+        task = self.make_task("Vence hoy", fecha_limite=timezone.localdate(), responsable=self.responsible)
+        self.run_command("--generate")
+
+        payload = json.loads(self.run_command("--pending", "--format=json", "--limit", "10"))
+
+        self.assertEqual(
+            {item["destinatario"]["id"] for item in payload},
+            {self.owner.id, self.responsible.id},
+        )
+        self.assertFalse(WorkflowAlert.objects.filter(estado=WorkflowAlert.Estado.CANCELADA).exists())
+
+    def test_pending_cancels_alerts_when_admin_config_is_disabled(self):
+        config = WorkflowAlertConfig.objects.create(workflow=self.workflow, canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM)
+        task = self.make_task("Atrasada", fecha_limite=timezone.localdate() - timezone.timedelta(days=1), responsable=self.responsible)
+        self.run_command("--generate")
+        config.activa = False
+        config.save(update_fields=["activa", "actualizado"])
+
+        payload = json.loads(self.run_command("--pending", "--format=json"))
+
+        self.assertEqual(payload, [])
+        self.assertEqual(WorkflowAlert.objects.get(tarea=task).estado, WorkflowAlert.Estado.CANCELADA)
+
+    def test_pending_cancels_previous_daily_overdue_reminder(self):
+        WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            repetir_atrasadas_diario=True,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+        )
+        task = self.make_task("Atrasada", fecha_limite=timezone.localdate() - timezone.timedelta(days=3), responsable=self.responsible)
+        old_alert = WorkflowAlert.objects.create(
+            tarea=task,
+            destinatario=self.responsible,
+            canal="telegram",
+            tipo=WorkflowAlert.Tipo.TAREA_ATRASADA,
+            dedupe_key="old-daily",
+            asunto="Ayer",
+            mensaje="Mensaje",
+            fecha_objetivo=timezone.localdate() - timezone.timedelta(days=1),
+        )
+
+        payload = json.loads(self.run_command("--pending", "--format=json"))
+
+        self.assertEqual(payload, [])
+        old_alert.refresh_from_db()
+        self.assertEqual(old_alert.estado, WorkflowAlert.Estado.CANCELADA)
+
+    def test_pending_cancels_alert_when_type_or_channel_disabled_in_config(self):
+        config = WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+            avisar_vencen_hoy=True,
+        )
+        task = self.make_task("Vence hoy", fecha_limite=timezone.localdate(), responsable=self.responsible)
+        self.run_command("--generate")
+        alert = WorkflowAlert.objects.get(tarea=task)
+
+        config.avisar_vencen_hoy = False
+        config.save(update_fields=["avisar_vencen_hoy", "actualizado"])
+        payload = json.loads(self.run_command("--pending", "--format=json"))
+
+        self.assertEqual(payload, [])
+        alert.refresh_from_db()
+        self.assertEqual(alert.estado, WorkflowAlert.Estado.CANCELADA)
+
+        config.avisar_vencen_hoy = True
+        config.canal_preferido = WorkflowAlertConfig.Canal.EMAIL
+        config.save(update_fields=["avisar_vencen_hoy", "canal_preferido", "actualizado"])
+        new_alert = WorkflowAlert.objects.create(
+            tarea=task,
+            destinatario=self.responsible,
+            canal="telegram",
+            tipo=WorkflowAlert.Tipo.VENCE_HOY,
+            dedupe_key="old-channel",
+            asunto="Canal antiguo",
+            mensaje="Mensaje",
+            fecha_objetivo=timezone.localdate(),
+        )
+        payload = json.loads(self.run_command("--pending", "--format=json"))
+
+        self.assertEqual(payload, [])
+        new_alert.refresh_from_db()
+        self.assertEqual(new_alert.estado, WorkflowAlert.Estado.CANCELADA)
+
+    def test_pending_cancels_alert_when_days_before_config_changes(self):
+        config = WorkflowAlertConfig.objects.create(
+            workflow=self.workflow,
+            canal_preferido=WorkflowAlertConfig.Canal.TELEGRAM,
+            dias_antes_vencimiento=3,
+            avisar_vencen_hoy=False,
+        )
+        task = self.make_task(
+            "Vence en tres días",
+            fecha_limite=timezone.localdate() + timezone.timedelta(days=3),
+            responsable=self.responsible,
+        )
+        self.run_command("--generate")
+        alert = WorkflowAlert.objects.get(tarea=task)
+
+        config.dias_antes_vencimiento = 2
+        config.save(update_fields=["dias_antes_vencimiento", "actualizado"])
+        payload = json.loads(self.run_command("--pending", "--format=json"))
+
+        self.assertEqual(payload, [])
+        alert.refresh_from_db()
+        self.assertEqual(alert.estado, WorkflowAlert.Estado.CANCELADA)
 
     def test_generate_creates_expected_alert_types_and_channels(self):
         hoy = timezone.localdate()

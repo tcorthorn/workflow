@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     WorkflowTemplate, TaskTemplate, TaskDependency, WorkflowInstance,
-    TaskInstance, WorkflowAlert, TaskHistory, TaskComment, TaskAttachment
+    TaskInstance, WorkflowAlertConfig, WorkflowAlert, TaskHistory, TaskComment, TaskAttachment
 )
 
 
@@ -39,12 +39,23 @@ class TaskInstanceInline(admin.TabularInline):
     fields = ('orden', 'nombre', 'responsable', 'estado', 'fecha_limite', 'fecha_inicio', 'fecha_termino')
 
 
+class WorkflowAlertConfigInline(admin.StackedInline):
+    model = WorkflowAlertConfig
+    extra = 0
+    max_num = 1
+    fields = (
+        'activa', 'canal_preferido', 'dias_antes_vencimiento',
+        'avisar_vencen_hoy', 'avisar_atrasadas', 'repetir_atrasadas_diario',
+        'avisar_sin_responsable', 'avisar_rechazadas', 'avisar_propietario',
+    )
+
+
 @admin.register(WorkflowInstance)
 class WorkflowInstanceAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'plantilla', 'estado', 'propietario', 'fecha_inicio', 'fecha_limite', 'porcentaje_avance')
     list_filter = ('estado', 'plantilla')
     search_fields = ('nombre', 'descripcion')
-    inlines = [TaskInstanceInline]
+    inlines = [WorkflowAlertConfigInline, TaskInstanceInline]
     actions = ['iniciar_flujos']
 
     @admin.action(description='Iniciar flujos seleccionados')
@@ -64,6 +75,17 @@ class TaskInstanceAdmin(admin.ModelAdmin):
     def terminar_tareas(self, request, queryset):
         for tarea in queryset:
             tarea.terminar(usuario=request.user, comentario='Terminada desde administración.')
+
+
+@admin.register(WorkflowAlertConfig)
+class WorkflowAlertConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        'workflow', 'activa', 'canal_preferido', 'dias_antes_vencimiento',
+        'avisar_vencen_hoy', 'avisar_atrasadas', 'repetir_atrasadas_diario',
+        'avisar_sin_responsable', 'avisar_rechazadas', 'avisar_propietario',
+    )
+    list_filter = ('activa', 'canal_preferido', 'avisar_atrasadas', 'avisar_rechazadas')
+    search_fields = ('workflow__nombre',)
 
 
 @admin.register(WorkflowAlert)

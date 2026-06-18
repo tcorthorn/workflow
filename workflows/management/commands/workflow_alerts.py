@@ -51,7 +51,7 @@ class Command(BaseCommand):
         self._validate_channels(channels)
         specs = []
         for task in self._tasks_for_generation():
-            specs.extend(self._alert_specs_for_task(task, channels))
+            specs.extend(self._alert_specs_for_task(task))
 
         created = 0
         existing = 0
@@ -194,19 +194,53 @@ class Command(BaseCommand):
             return True
         if task.workflow.estado != WorkflowInstance.Estado.EN_CURSO:
             return True
-        expected_recipient = task.responsable or task.workflow.propietario
-        if alert.destinatario_id != (expected_recipient.id if expected_recipient else None):
+        config = self._alert_config_for_task(task)
+        if not config["activa"]:
             return True
+        valid_recipient_ids = {
+            recipient.id if recipient else None
+            for recipient in self._alert_recipients_for_task(task, config)
+        }
+        if alert.destinatario_id not in valid_recipient_ids:
+            return True
+        if alert.canal not in config["channels"]:
+            return True
+        if not self._alert_enabled_by_config(alert, task, config):
+            return True
+        if alert.tipo == WorkflowAlert.Tipo.TAREA_ATRASADA:
+            today = timezone.localdate()
+            expected_date = today if config["repetir_atrasadas_diario"] else task.fecha_limite
+            if alert.fecha_objetivo != expected_date:
+                return True
         return not self._alert_type_applies(task, alert.tipo, alert.fecha_objetivo)
+
+    def _alert_enabled_by_config(self, alert, task, config):
+        today = timezone.localdate()
+        if alert.tipo == WorkflowAlert.Tipo.TAREA_ATRASADA:
+            return bool(config["avisar_atrasadas"])
+        if alert.tipo == WorkflowAlert.Tipo.VENCE_HOY:
+            return bool(config["avisar_vencen_hoy"] and alert.fecha_objetivo == today)
+        if alert.tipo == WorkflowAlert.Tipo.VENCE_MANANA:
+            return bool(config["dias_antes_vencimiento"] == 1 and alert.fecha_objetivo == today + timezone.timedelta(days=1))
+        if alert.tipo == WorkflowAlert.Tipo.VENCE_PROXIMAMENTE:
+            days = config["dias_antes_vencimiento"]
+            return bool(days > 1 and alert.fecha_objetivo == today + timezone.timedelta(days=days))
+        if alert.tipo == WorkflowAlert.Tipo.SIN_RESPONSABLE:
+            return bool(config["avisar_sin_responsable"])
+        if alert.tipo == WorkflowAlert.Tipo.TAREA_RECHAZADA:
+            return bool(config["avisar_rechazadas"])
+        return False
 
     def _alert_type_applies(self, task, alert_type, target_date):
         today = timezone.localdate()
         if alert_type == WorkflowAlert.Tipo.TAREA_ATRASADA:
-            return bool(target_date and task.fecha_limite == target_date and target_date < today)
+            return bool(task.fecha_limite and task.fecha_limite < today and (target_date is None or target_date <= today))
         if alert_type == WorkflowAlert.Tipo.VENCE_HOY:
             return bool(target_date and task.fecha_limite == target_date and target_date == today)
         if alert_type == WorkflowAlert.Tipo.VENCE_MANANA:
             return bool(target_date and task.fecha_limite == target_date and target_date == today + timezone.timedelta(days=1))
+        if alert_type == WorkflowAlert.Tipo.VENCE_PROXIMAMENTE:
+            return bool(target_date and task.fecha_limite == target_date and target_date > today)
         if alert_type == WorkflowAlert.Tipo.SIN_RESPONSABLE:
             return task.responsable_id is None
         if alert_type == WorkflowAlert.Tipo.TAREA_RECHAZADA:
@@ -215,43 +249,84 @@ class Command(BaseCommand):
 
     def _tasks_for_generation(self):
         return (
-            TaskInstance.objects.select_related("workflow", "workflow__propietario", "responsable")
+            TaskInstance.objects.select_related("workflow", "workflow__propietario", "workflow__alert_config", "responsable")
             .filter(workflow__estado=WorkflowInstance.Estado.EN_CURSO)
             .exclude(estado=TaskInstance.Estado.TERMINADA)
         )
 
-    def _alert_specs_for_task(self, task, channels):
+    def _alert_specs_for_task(self, task):
         hoy = timezone.localdate()
+        config = self._alert_config_for_task(task)
+        if not config["activa"]:
+            return []
+
         specs = []
         alert_types = []
 
-        if task.fecha_limite and task.fecha_limite < hoy:
-            alert_types.append((WorkflowAlert.Tipo.TAREA_ATRASADA, task.fecha_limite))
-        if task.fecha_limite == hoy:
+        if config["avisar_atrasadas"] and task.fecha_limite and task.fecha_limite < hoy:
+            fecha_alerta = hoy if config["repetir_atrasadas_diario"] else task.fecha_limite
+            alert_types.append((WorkflowAlert.Tipo.TAREA_ATRASADA, fecha_alerta))
+        if config["avisar_vencen_hoy"] and task.fecha_limite == hoy:
             alert_types.append((WorkflowAlert.Tipo.VENCE_HOY, task.fecha_limite))
-        if task.fecha_limite == hoy + timezone.timedelta(days=1):
-            alert_types.append((WorkflowAlert.Tipo.VENCE_MANANA, task.fecha_limite))
-        if task.responsable_id is None:
+        if config["dias_antes_vencimiento"] > 0 and task.fecha_limite == hoy + timezone.timedelta(days=config["dias_antes_vencimiento"]):
+            tipo = WorkflowAlert.Tipo.VENCE_MANANA if config["dias_antes_vencimiento"] == 1 else WorkflowAlert.Tipo.VENCE_PROXIMAMENTE
+            alert_types.append((tipo, task.fecha_limite))
+        if config["avisar_sin_responsable"] and task.responsable_id is None:
             alert_types.append((WorkflowAlert.Tipo.SIN_RESPONSABLE, None))
-        if task.estado == TaskInstance.Estado.RECHAZADA:
+        if config["avisar_rechazadas"] and task.estado == TaskInstance.Estado.RECHAZADA:
             alert_types.append((WorkflowAlert.Tipo.TAREA_RECHAZADA, task.fecha_limite))
 
-        destinatario = task.responsable or task.workflow.propietario
+        destinatarios = self._alert_recipients_for_task(task, config)
+
         for tipo, fecha_objetivo in alert_types:
-            for channel in channels:
-                specs.append(
-                    {
-                        "tarea": task,
-                        "destinatario": destinatario,
-                        "tipo": tipo,
-                        "canal": channel,
-                        "dedupe_key": self._dedupe_key(task, tipo, fecha_objetivo, destinatario, channel),
-                        "asunto": self._subject(task, tipo),
-                        "mensaje": self._message(task, tipo, fecha_objetivo),
-                        "fecha_objetivo": fecha_objetivo,
-                    }
-                )
+            for destinatario in destinatarios:
+                for channel in config["channels"]:
+                    specs.append(
+                        {
+                            "tarea": task,
+                            "destinatario": destinatario,
+                            "tipo": tipo,
+                            "canal": channel,
+                            "dedupe_key": self._dedupe_key(task, tipo, fecha_objetivo, destinatario, channel),
+                            "asunto": self._subject(task, tipo),
+                            "mensaje": self._message(task, tipo, fecha_objetivo),
+                            "fecha_objetivo": fecha_objetivo,
+                        }
+                    )
         return specs
+
+    def _alert_config_for_task(self, task):
+        config = getattr(task.workflow, "alert_config", None)
+        default_channels = getattr(settings, "WORKFLOW_ALERTS_DEFAULT_CHANNELS", None) or ["telegram"]
+        if config is None:
+            return {
+                "activa": True,
+                "channels": default_channels,
+                "dias_antes_vencimiento": 1,
+                "avisar_vencen_hoy": True,
+                "avisar_atrasadas": True,
+                "repetir_atrasadas_diario": False,
+                "avisar_sin_responsable": True,
+                "avisar_rechazadas": True,
+                "avisar_propietario": False,
+            }
+        return {
+            "activa": config.activa,
+            "channels": config.channels,
+            "dias_antes_vencimiento": config.dias_antes_vencimiento,
+            "avisar_vencen_hoy": config.avisar_vencen_hoy,
+            "avisar_atrasadas": config.avisar_atrasadas,
+            "repetir_atrasadas_diario": config.repetir_atrasadas_diario,
+            "avisar_sin_responsable": config.avisar_sin_responsable,
+            "avisar_rechazadas": config.avisar_rechazadas,
+            "avisar_propietario": config.avisar_propietario,
+        }
+
+    def _alert_recipients_for_task(self, task, config):
+        recipients = [task.responsable or task.workflow.propietario]
+        if config["avisar_propietario"] and task.workflow.propietario_id:
+            recipients.append(task.workflow.propietario)
+        return list(dict.fromkeys(recipients))
 
     def _dedupe_key(self, task, tipo, fecha_objetivo, destinatario, channel):
         destinatario_key = destinatario.id if destinatario else "none"
@@ -263,6 +338,7 @@ class Command(BaseCommand):
             WorkflowAlert.Tipo.TAREA_ATRASADA: "Tarea atrasada",
             WorkflowAlert.Tipo.VENCE_HOY: "Tarea vence hoy",
             WorkflowAlert.Tipo.VENCE_MANANA: "Tarea vence mañana",
+            WorkflowAlert.Tipo.VENCE_PROXIMAMENTE: "Tarea vence próximamente",
             WorkflowAlert.Tipo.SIN_RESPONSABLE: "Tarea sin responsable",
             WorkflowAlert.Tipo.TAREA_RECHAZADA: "Tarea rechazada",
         }
@@ -270,11 +346,12 @@ class Command(BaseCommand):
 
     def _message(self, task, tipo, fecha_objetivo):
         workflow = task.workflow.nombre
-        due = fecha_objetivo.isoformat() if fecha_objetivo else "sin fecha límite"
+        due = task.fecha_limite.isoformat() if task.fecha_limite else "sin fecha límite"
         messages = {
             WorkflowAlert.Tipo.TAREA_ATRASADA: f"La tarea '{task.nombre}' del workflow '{workflow}' está atrasada. Fecha límite: {due}.",
             WorkflowAlert.Tipo.VENCE_HOY: f"La tarea '{task.nombre}' del workflow '{workflow}' vence hoy ({due}).",
             WorkflowAlert.Tipo.VENCE_MANANA: f"La tarea '{task.nombre}' del workflow '{workflow}' vence mañana ({due}).",
+            WorkflowAlert.Tipo.VENCE_PROXIMAMENTE: f"La tarea '{task.nombre}' del workflow '{workflow}' vence próximamente ({due}).",
             WorkflowAlert.Tipo.SIN_RESPONSABLE: f"La tarea '{task.nombre}' del workflow '{workflow}' no tiene responsable asignado.",
             WorkflowAlert.Tipo.TAREA_RECHAZADA: f"La tarea '{task.nombre}' del workflow '{workflow}' fue rechazada y requiere atención.",
         }

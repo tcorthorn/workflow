@@ -235,11 +235,44 @@ class TaskInstance(TimestampedModel):
         TaskHistory.objects.create(tarea=self, usuario=usuario, accion='reabierta', detalle=comentario)
 
 
+class WorkflowAlertConfig(TimestampedModel):
+    class Canal(models.TextChoices):
+        TELEGRAM = 'telegram', 'Telegram'
+        EMAIL = 'email', 'Email'
+        AMBOS = 'ambos', 'Telegram + Email'
+
+    workflow = models.OneToOneField(WorkflowInstance, on_delete=models.CASCADE, related_name='alert_config')
+    activa = models.BooleanField(default=True)
+    canal_preferido = models.CharField(max_length=20, choices=Canal.choices, default=Canal.TELEGRAM)
+    dias_antes_vencimiento = models.PositiveIntegerField(default=1)
+    avisar_vencen_hoy = models.BooleanField(default=True)
+    avisar_atrasadas = models.BooleanField(default=True)
+    repetir_atrasadas_diario = models.BooleanField(default=True)
+    avisar_sin_responsable = models.BooleanField(default=True)
+    avisar_rechazadas = models.BooleanField(default=True)
+    avisar_propietario = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = 'Configuración de alertas'
+        verbose_name_plural = 'Configuraciones de alertas'
+
+    def __str__(self):
+        estado = 'activas' if self.activa else 'inactivas'
+        return f'Alertas {estado} - {self.workflow}'
+
+    @property
+    def channels(self):
+        if self.canal_preferido == self.Canal.AMBOS:
+            return ['telegram', 'email']
+        return [self.canal_preferido]
+
+
 class WorkflowAlert(TimestampedModel):
     class Tipo(models.TextChoices):
         TAREA_ATRASADA = 'tarea_atrasada', 'Tarea atrasada'
         VENCE_HOY = 'vence_hoy', 'Vence hoy'
         VENCE_MANANA = 'vence_manana', 'Vence mañana'
+        VENCE_PROXIMAMENTE = 'vence_proximamente', 'Vence próximamente'
         SIN_RESPONSABLE = 'sin_responsable', 'Sin responsable'
         TAREA_RECHAZADA = 'tarea_rechazada', 'Tarea rechazada'
 
